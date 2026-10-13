@@ -1,0 +1,85 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: oc-pipelines-oc-final
+  namespace: oc-pipelines
+spec:
+  description: >-
+    oc-pipelines CI/CD pipeline - cleanup, git-clone, flake8, nose,
+    buildah and deploy (openshift-client).
+  params:
+    - name: git-url
+      type: string
+      default: https://github.com/H8rsh100/oc-pipelines.git
+    - name: git-revision
+      type: string
+      default: main
+    - name: image-name
+      type: string
+      default: image-registry.openshift-image-registry.svc:5000/oc-pipelines/oc-pipelines-oc-final
+  workspaces:
+    - name: shared-workspace
+  tasks:
+    - name: cleanup
+      taskRef:
+        name: cleanup
+        kind: Task
+      workspaces:
+        - name: shared-workspace
+          workspace: shared-workspace
+    - name: git-clone
+      taskRef:
+        name: git-clone
+        kind: Task
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+    - name: flake8
+      taskRef:
+        name: flake8
+        kind: Task
+      runAfter:
+        - git-clone
+      workspaces:
+        - name: shared-workspace
+          workspace: shared-workspace
+    - name: nose
+      taskRef:
+        name: nose
+        kind: Task
+      runAfter:
+        - flake8
+      workspaces:
+        - name: shared-workspace
+          workspace: shared-workspace
+    - name: buildah
+      taskRef:
+        name: buildah
+        kind: Task
+      runAfter:
+        - nose
+      params:
+        - name: IMAGE
+          value: $(params.image-name)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+    - name: deploy
+      taskRef:
+        name: openshift-client
+        kind: Task
+      runAfter:
+        - buildah
+      params:
+        - name: SCRIPT
+          value: |
+            oc rollout restart dc/oc-pipelines-oc-final -n oc-pipelines
+            oc rollout status dc/oc-pipelines-oc-final -n oc-pipelines
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-workspace
