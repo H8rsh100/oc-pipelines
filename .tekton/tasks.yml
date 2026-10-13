@@ -1,0 +1,72 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cleanup
+  namespace: oc-pipelines
+spec:
+  description: >-
+    Cleanup task - removes leftover build and test artifacts from the shared
+    workspace before a new pipeline run starts.
+  params:
+    - name: working-dir
+      type: string
+      default: /workspace/repo
+  workspaces:
+    - name: shared-workspace
+      description: The workspace shared by the pipeline tasks.
+  steps:
+    - name: cleanup
+      image: docker.io/library/python:3.8-slim
+      workingDir: $(params.working-dir)
+      command:
+        - /bin/sh
+        - -c
+      args:
+        - |
+          set -e
+          echo "=== cleanup task: removing build and test leftovers ==="
+          rm -rf build dist .pytest_cache .mypy_cache
+          find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+          find . -type f -name "*.pyc" -delete
+          rm -f nosetests.xml
+          echo "=== cleanup task: workspace is clean ==="
+          ls -la
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: nose
+  namespace: oc-pipelines
+spec:
+  description: >-
+    Nose task - runs the Python unit tests with the nose test runner and
+    publishes the results into the shared workspace.
+  params:
+    - name: working-dir
+      type: string
+      default: /workspace/repo
+    - name: test-path
+      type: string
+      default: tests
+  workspaces:
+    - name: shared-workspace
+      description: The workspace shared by the pipeline tasks.
+  steps:
+    - name: run-nose
+      image: docker.io/library/python:3.8-slim
+      workingDir: $(params.working-dir)
+      command:
+        - /bin/sh
+        - -c
+      args:
+        - |
+          set -e
+          echo "=== nose task: installing dependencies ==="
+          pip install --no-cache-dir nose
+          if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+          echo "=== nose task: running unit tests ==="
+          nosetests $(params.test-path) --with-xunit --xunit-file=nosetests.xml
+          echo "=== nose task: unit tests passed ==="
+  results:
+    - name: nose-status
+      description: Status of the nose unit test run.
